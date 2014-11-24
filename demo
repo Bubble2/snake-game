@@ -1,0 +1,306 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>简易贪吃蛇原型</title>
+<style>
+	body,div{margin:0;padding:0;}
+	.snake{width:600px;height:600px;margin:0 auto;background:#ccc;position:relative;overflow:hidden;}
+	.snake_item{position:absolute;width:18px;height:18px;border:1px solid #000;line-height:20px;background:#666;color:#fff;text-align:center;}
+	.snake_food{position:absolute;width:18px;height:18px;border:1px solid #000;background:#f00;}
+	.gamestart,.gamerestart,.score{position:absolute;top:50%;left:0;margin-top:-20px;width:100%;height:40px;line-height:40px;text-align:center;text-align:center;}
+	.gamestart a,.gamerestart a{color:#333;font-size:30px;text-decoration:none;}
+	.gameover{position:absolute;top:50%;left:0;margin-top:-60px;color:#333;font-size:40px;width:100%;height:40px;line-height:40px;text-align:center;}
+	.score{margin-top:-20px;color:#333;font-size:16px;}
+	.gamerestart{margin-top:20px;}
+</style>
+<script src="http://cdnjscn.b0.upaiyun.com/libs/jquery/1.10.1/jquery.min.js"></script>
+<script>
+	$(function(){
+		var snake=new Snake({wrap:$(".snake")});  //实例化一个贪食蛇
+	});
+	
+	//贪食蛇构造函数
+	function Snake(opts){
+		this.defaults={
+			initSpeed:500,  //初始速度
+			initNum:5	
+		};
+		this.opt=$.extend({},this.defaults,opts);
+		this.wrap=this.opt.wrap;    //包裹对象
+		this.initNum=0;    //初始方块数
+		this.iSpeed=0;    //初始速度
+		this.foodX=0;     //存储随机食物的位置
+		this.foodY=0;
+		this.eatLeft=0;  //存储吃完食物添加位置
+		this.eatTop=0;
+		this.wrapWidth=this.wrap.outerWidth();  
+		this.wrapHeight=this.wrap.outerHeight();
+		this.items=null;  //方块数jq对象
+		this.len=0;      //方块数个数
+		this.itemSize=0; //方块尺寸
+		this.arrLeft=[];  //存储每个方块的位置
+		this.arrTop=[];
+		this.timer=null;  
+		this.curDirect=null;   //当前蛇移动的方向
+		this.score=0;   //得分
+		this.gameStart(); 
+	}
+	
+	Snake.prototype={
+		constructor:Snake,   //重新指定构造函数
+		
+		/**
+		 * 游戏开始方法
+		 * @method gameOver
+		**/
+		gameStart:function(){
+			var _this=this;
+			var gameStartHtml='<div class="gamestart"><a href="javascript:;">开始游戏</a></div>';
+			this.wrap.append(gameStartHtml);
+			this.wrap.find(".gamestart a").click(function(){
+				_this.init();
+				$(this).parent().remove();
+			});
+		},
+		
+		/**
+		 * 游戏结束方法
+		 * @method gameOver
+		**/
+		gameOver:function(){
+			var _this=this;
+			var gameOverHtml='<div class="gameover">GAME OVER</div>';
+			this.wrap.append(gameOverHtml);
+			var scoreHtml='<div class="score">您的得分：'+this.score+'</div>';
+			this.wrap.append(scoreHtml);
+			var gameRestart='<div class="gamerestart"><a href="javascript:;">重新开始</a></div>';
+			this.wrap.append(gameRestart);
+			$(document).off("keydown");  //移除键盘事件
+			this.wrap.find(".gamerestart a").click(function(){
+				_this.wrap.empty();
+				_this.init();
+			});
+		},
+		
+		/**
+		 * 初始化方法
+		 * @method init
+		**/
+		init:function(){
+			var _this=this;
+			this.initNum=this.opt.initNum;
+			var itemHtml='';
+			//创建贪食蛇
+			for(var i=0;i<this.initNum;i++){
+				itemHtml+='<div class="snake_item"></div>';
+			}
+			this.wrap.append(itemHtml);
+			
+			//重新开始游戏时重置这些属性
+			this.items=this.wrap.find(".snake_item");
+			this.len=this.items.length;
+			this.itemSize=this.items.eq(0).outerWidth(true);
+			this.arrLeft=[];
+			this.arrTop=[];
+			this.iSpeed=this.opt.initSpeed;
+			this.curDirect="right";
+			this.score=0;
+			
+			//每一小方块初始坐标
+			for(var i=0;i<this.len;i++){
+				this.arrLeft.push(this.itemSize*(this.len-1-i));
+				this.arrTop.push(0);
+				this.items.eq(i).css({"left":_this.arrLeft[i],"top":_this.arrTop[i]});
+			};
+			
+			this.move("right");  //初始向右运动
+			this.createFood();  //随机生成一个小方块
+			
+			//键盘事件
+			$(document).on("keydown",function(event){
+				event.preventDefault();
+				// keyCode ：上--38  下---40  左--37  右--39
+				if(event.which==38&&_this.curDirect!="bottom"&&_this.curDirect!="top"){
+					_this.move("top");	
+				}else if(event.which==40&&_this.curDirect!="top"&&_this.curDirect!="bottom"){
+					_this.move("bottom");	
+				}else if(event.which==37&&_this.curDirect!="right"&&_this.curDirect!="left"){
+					_this.move("left");		
+				}else if(event.which==39&&_this.curDirect!="left"&&_this.curDirect!="right"){
+					_this.move("right");
+				}
+			});	
+			
+			
+		},
+		
+		/**
+		 * 移动方法
+		 * @method move
+		 * @param {string} direct 传递运动的方向
+		**/
+		move:function(direct){
+			var _this=this;
+			clearInterval(_this.timer);
+			var curX=0;
+			var curY=0;
+			this.timer=setInterval(function(){
+				
+				//存放最后一个方块位置
+				_this.eatLeft=_this.arrLeft[0];
+				_this.eatTop=_this.arrTop[0];
+				
+				//数组重置（每走一步就把新的位置存入数组，所以要先清空数组）
+				_this.arrLeft=[];
+				_this.arrTop=[];
+				
+				//四种方向判断（如果当前方向和鼠标响应的方向相反，那么继续当前方向移动）
+				if(direct=="top"){
+					curY=parseInt(_this.items.eq(0).css("top"))-_this.itemSize;
+					curX=parseInt(_this.items.eq(0).css("left"));
+					_this.curDirect="top";
+				}else if(direct=="bottom"){
+					curY=parseInt(_this.items.eq(0).css("top"))+_this.itemSize;
+					curX=parseInt(_this.items.eq(0).css("left"));
+					_this.curDirect="bottom";	
+				}else if(direct=="left"){
+					curX=parseInt(_this.items.eq(0).css("left"))-_this.itemSize;
+					curY=parseInt(_this.items.eq(0).css("top"));
+					_this.curDirect="left";	
+				}else if(direct=="right"){
+					curX=parseInt(_this.items.eq(0).css("left"))+_this.itemSize;	
+					curY=parseInt(_this.items.eq(0).css("top"));
+					_this.curDirect="right";
+				}
+				
+				//根据前面一个方块的位置获取当前方块的位置，并存入数组中
+				for(var i=_this.len-1;i>0;i--)
+				{
+					_this.arrLeft.push(parseInt(_this.items.eq(i-1).css("left")));
+					_this.arrTop.push(parseInt(_this.items.eq(i-1).css("top")));
+					_this.items.eq(i).css({"left":_this.arrLeft[_this.len-i-1]});
+					_this.items.eq(i).css({"top":_this.arrTop[_this.len-i-1]});
+				}
+				
+				_this.items.eq(0).css({"left":curX,"top":curY});  //第一个方块位置确定下来，后面的方块都跟着前一个方块走
+				_this.arrLeft.push(curX);
+				_this.arrTop.push(curY);
+				_this.fnEat();  //吃到食物操作
+				if(_this.knock()==false){  //判断是够撞到墙壁或者撞到自己
+					clearInterval(_this.timer);
+				};
+			},this.iSpeed);
+		},
+		
+		/**
+		 * 随机一个对象坐标
+		 * @method randomFood
+		 * @return {obj} rdX和rdY,分别为随机对象的x轴所标和y轴坐标
+		**/
+		randomFood:function(){
+			var w=this.wrapWidth;
+			var h=this.wrapHeight;
+			var itemSize=this.itemSize;
+			var rdX=Math.random()*w;
+			var rdY=Math.random()*h;
+			
+			//随机出来的坐标需要是方块尺寸的倍数
+			rdX=rdX%itemSize>itemSize/2?rdX-rdX%itemSize+itemSize:rdX-rdX%itemSize;
+			rdY=rdY%itemSize>itemSize/2?rdY-rdY%itemSize+itemSize:rdY-rdY%itemSize;
+			
+			//控制不能超出包裹区域
+			rdX=rdX>w-itemSize?w-itemSize:rdX;
+			rdY=rdY>h-itemSize?h-itemSize:rdY;
+			
+			//返回随机的坐标
+			return{
+				rdX:rdX,
+				rdY:rdY
+			}	
+		},
+		
+		/**
+		 * 创建食物
+		 * @method createFood
+		**/
+		createFood:function(){
+			var _this=this;
+			var rdObj=this.randomFood();
+			var rdX=rdObj.rdX;
+			var rdY=rdObj.rdY;
+			for(var i=0;i<this.len;i++){
+				if(this.arrLeft[i]==rdX&&this.arrTop[i]==rdY){  //如果第一次随机生成的方块位置和蛇的身体重合，那么重新随机一次，直到不重合
+					rdObj=this.randomFood();
+					rdX=rdObj.rdX;
+					rdY=rdObj.rdY;
+				}
+			}	
+			var foodHtml='<div class="snake_food"></div>';
+			$(foodHtml).css({"left":rdX,"top":rdY}).appendTo(_this.wrap);
+			this.foodX=rdX;
+			this.foodY=rdY;
+		},
+		
+		/**
+		 * 检测是否吃到食物
+		 * @method isEat
+		 * @return {boolean} true表示吃到食物
+		**/
+		isEat:function(){
+			if(this.arrLeft[this.len-1]==this.foodX&&this.arrTop[this.len-1]==this.foodY){
+				return true;
+			}	
+		},
+		
+		/**
+		 * 吃到食物后的操作
+		 * @method fnEat
+		**/
+		fnEat:function(){
+			if(this.isEat()){
+				var _this=this;
+				var addHtml='<div class="snake_item"></div>';
+				$(addHtml).css({"top":_this.eatTop,"left":_this.eatLeft}).appendTo(_this.wrap);
+				this.items=this.wrap.find(".snake_item");//重新获取item
+				this.len=this.items.length;  //重新获取方块个数
+				this.score++;
+				this.wrap.find(".snake_food").remove();
+				this.createFood();
+				this.iSpeed=this.iSpeed<=100?100:this.iSpeed-50; //加速运动
+			}	
+		},
+		
+		/**
+		 * 检测是否碰撞
+		 * @method isEat
+		 * @return {boolean} false表示碰撞
+		**/
+		knock:function(){
+			var arrLeft=this.arrLeft;
+			var arrTop=this.arrTop;
+			var len=this.len;
+			
+			//碰到墙壁，游戏结束
+			if(arrLeft[len-1]<0||arrLeft[len-1]>=this.wrapWidth||arrTop[len-1]<0||arrTop[len-1]>=this.wrapHeight){
+				this.gameOver();
+				return false;
+			}
+			
+			//舌头碰到蛇身体，游戏结束
+			for(var i=0;i<len-1;i++){
+				if(arrLeft[len-1]==arrLeft[i]&&arrTop[len-1]==arrTop[i]){
+					this.gameOver();
+					return false;
+				}
+			}	
+		}
+				
+		
+	}
+</script>
+</head>
+<body>
+	<div class="snake"></div>
+</body>
+</html>
